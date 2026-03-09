@@ -131,7 +131,6 @@
 | Profils `llm_profiles` par agent | [x] |
 | **Commandes `/claude` et `/mammouth`** (one-shot API externes) | [ ] |
 | **Support multi-backends** dans `llm_client.py` (Anthropic, OpenAI) | [ ] |
-| **Désactiver le thinking mode** de qwen3 (`/no_think`) | [ ] |
 | **Timeout par étape** dans `_llm_loop` (pas seulement global) | [ ] |
 | **Limiter `max_steps`** configurable selon l'agent | [ ] |
 | **Streaming des réponses LLM** vers XMPP (réponse progressive) | [ ] |
@@ -161,7 +160,7 @@
 | Statut online/offline temps réel (MQTT retained) | [x] |
 | **Dashboard web simple** — statut de tous les agents en temps réel | [ ] |
 | **Métriques** — nb tâches/jour, temps moyen, taux d'erreur | [ ] |
-| **Alertes** — notifier si un agent est offline depuis X minutes | [ ] |
+| **Alertes** — notifier si un agent est offline depuis X minutes (paramétrable, désactivable) | [ ] |
 | **Agrégation des logs** vers un topic MQTT centralisé | [ ] |
 
 ---
