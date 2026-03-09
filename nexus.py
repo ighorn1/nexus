@@ -370,6 +370,34 @@ Mode @agent :
     # Broadcast handler
     # ──────────────────────────────────────────────
 
+    def on_xmpp_connected(self):
+        """Au démarrage XMPP : envoie le récap des agents connus dans le MUC."""
+        import time as _time
+        _time.sleep(2)  # Laisser le MUC join et les agents publier
+        with self._online_lock:
+            online = set(self._online_agents)
+        all_caps = self.registry.all_agents()
+        lines = ["── Agents au démarrage ──"]
+        for caps in sorted(all_caps, key=lambda c: c.agent_id):
+            if caps.agent_id == self.agent_id:
+                continue
+            icon = "🟢" if caps.agent_id in online else "🔴"
+            label = "en ligne" if caps.agent_id in online else "hors ligne"
+            lines.append(f"  {icon} {caps.agent_id} — {label}")
+        if len(lines) > 1 and self.xmpp:
+            self.xmpp.send_to_group("\n".join(lines))
+
+    def on_agent_status_change(self, agent_id: str, status: str):
+        """Notifie le MUC et les admins quand un agent change de statut."""
+        icon = "🟢" if status == "online" else "🔴"
+        label = "en ligne" if status == "online" else "hors ligne"
+        text = f"{icon} {agent_id} est {label}."
+        logger.info(f"[Nexus] Statut agent : {text}")
+        if self.xmpp:
+            if self.xmpp.muc_room:
+                self.xmpp.send_to_group(text)
+            self.xmpp.send_to_all_admins(text)
+
     def on_broadcast(self, msg: Message):
         """Nexus reçoit les broadcasts — les transmet à l'admin si pertinent."""
         if msg.type == MessageType.ALERT:
