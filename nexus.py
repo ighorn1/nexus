@@ -14,8 +14,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-# Ajout du chemin agents_core si non installé en package
-sys.path.insert(0, "/opt")
 
 from agents_core import BaseAgent, AgentContext, Message, MessageType
 from agents_core.command_parser import ParsedCommand, CommandType, help_text
