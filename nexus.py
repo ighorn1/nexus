@@ -131,6 +131,8 @@ class Nexus(BaseAgent):
         """Override — Nexus gère les commandes et délègue au LLM."""
         from agents_core.command_parser import parse as parse_command
 
+        logger.info(f"[XMPP] Message de {sender}: {body[:80]!r}")
+
         if self._sleep_mode and not body.strip().startswith("/"):
             return  # En veille, ignore les messages sauf commandes système
 
