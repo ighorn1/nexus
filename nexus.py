@@ -143,31 +143,36 @@ class Nexus(BaseAgent):
         if cmd.type == CommandType.SYSTEM:
             reply = self._handle_system_command(f"/{cmd.command} {cmd.args}", raw_cmd=cmd)
             if reply and self.xmpp:
-                self.xmpp.send_message(sender, reply)
+                self._xmpp_reply(sender, reply, is_muc)
             return
 
         # ── Message direct @agent
         if cmd.type == CommandType.DIRECT:
             reply = self._delegate_direct(cmd, sender)
             if self.xmpp:
-                self.xmpp.send_message(sender, reply)
+                self._xmpp_reply(sender, reply, is_muc)
             return
 
         # ── Broadcast @all
         if cmd.type == CommandType.BROADCAST:
             self.mqtt.broadcast(cmd.args or "")
             if self.xmpp:
-                self.xmpp.send_message(sender, "Broadcast envoyé à tous les agents.")
+                self._xmpp_reply(sender, "Broadcast envoyé à tous les agents.", is_muc)
             return
 
         # ── Mode naturel → LLM → skills
         extra_ctx = self.registry.summary_for_llm(self._online_agents)
         response = self._llm_loop(body, context, extra_ctx)
 
-        # Enregistre le JID pour le retour asynchrone éventuel
-        # (si le LLM a délégué à un agent via DELEGATE skill)
         if self.xmpp:
-            self.xmpp.send_message(sender, response)
+            self._xmpp_reply(sender, response, is_muc)
+
+    def _xmpp_reply(self, sender: str, body: str, is_muc: bool):
+        """Répond dans le bon canal : MUC si message vient du MUC, direct sinon."""
+        if is_muc:
+            self.xmpp.send_to_group(body)
+        else:
+            self.xmpp.send_message(sender, body)
 
     def _delegate_direct(self, cmd: ParsedCommand, sender_jid: str) -> str:
         """Route @agent message directement via MQTT."""
