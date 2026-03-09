@@ -244,6 +244,9 @@ class Nexus(BaseAgent):
             self.mqtt.send_to(target, "/update", msg_type=MessageType.COMMAND)
             return f"Mise à jour demandée à {target}."
 
+        if cmd == "llm":
+            return self._handle_llm_command(args)
+
         if cmd == "admins":
             return self._handle_admins_command(args)
 
@@ -251,6 +254,83 @@ class Nexus(BaseAgent):
             return self._nexus_help()
 
         return f"Commande inconnue : /{cmd}. Tape /help."
+
+    def _handle_llm_command(self, args: str) -> str:
+        """
+        /llm                          → statut actuel
+        /llm local                    → switch tous les agents vers le profil local
+        /llm cloud                    → switch tous les agents vers le profil cloud
+        /llm list                     → liste les modèles Ollama disponibles
+        /llm set local <model>        → définit + active le profil local
+        /llm set cloud <model>        → définit + active le profil cloud
+        """
+        args = args.strip()
+
+        if not args:
+            current = self.config["llm"]["model"]
+            profiles = self.config.get("llm_profiles", {})
+            local = profiles.get("local", "non configuré")
+            cloud = profiles.get("cloud", "non configuré")
+            tag = "cloud" if ":cloud" in current else "local"
+            return (
+                f"── LLM actif : {current} ({tag}) ──\n"
+                f"  local : {local}\n"
+                f"  cloud : {cloud}\n"
+                f"Commandes : /llm local | /llm cloud | /llm list\n"
+                f"            /llm set local <model> | /llm set cloud <model>"
+            )
+
+        if args in ("local", "cloud"):
+            profiles = self.config.get("llm_profiles", {})
+            model = profiles.get(args)
+            if not model:
+                return f"Profil '{args}' non configuré. Utilise : /llm set {args} <model>"
+            return self._switch_all_llm(args, model)
+
+        if args == "list":
+            return self._list_ollama_models()
+
+        if args.startswith("set "):
+            rest = args[4:].strip().split(None, 1)
+            if len(rest) < 2:
+                return "Usage : /llm set local <model> | /llm set cloud <model>"
+            profile, model = rest[0].lower(), rest[1].strip()
+            if profile not in ("local", "cloud"):
+                return "Profil invalide : utilise 'local' ou 'cloud'."
+            return self._switch_all_llm(profile, model)
+
+        return "Usage : /llm | /llm local | /llm cloud | /llm list | /llm set local|cloud <model>"
+
+    def _switch_all_llm(self, profile: str, model: str) -> str:
+        """Broadcast le switch LLM à tous les agents + applique localement."""
+        import json as _json
+        payload = _json.dumps({"profile": profile, "model": model})
+        self.mqtt.publish_raw("agents/llm/switch", payload, retain=True)
+        # Application locale immédiate
+        self.llm.model = model
+        self.config["llm"]["model"] = model
+        self.config.setdefault("llm_profiles", {})[profile] = model
+        self._save_config()
+        return f"✅ Switch LLM → {model} (profil {profile}) appliqué à tous les agents."
+
+    def _list_ollama_models(self) -> str:
+        """Liste les modèles disponibles sur Ollama, séparés local/cloud."""
+        import requests as _req
+        base_url = self.config["llm"]["base_url"]
+        try:
+            resp = _req.get(f"{base_url}/api/tags", timeout=10)
+            resp.raise_for_status()
+            models = resp.json().get("models", [])
+            local = sorted(m["name"] for m in models if ":cloud" not in m["name"])
+            cloud = sorted(m["name"] for m in models if ":cloud" in m["name"])
+            lines = [f"── Modèles Ollama ({base_url}) ──"]
+            lines.append("Local :")
+            lines.extend(f"  {m}" for m in local)
+            lines.append("Cloud :")
+            lines.extend(f"  {m}" for m in cloud)
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Erreur Ollama : {e}"
 
     def _handle_admins_command(self, args: str) -> str:
         """
@@ -336,6 +416,10 @@ class Nexus(BaseAgent):
   /schedule <freq> @a tâche — Planifier une tâche
   /schedules                — Voir les tâches planifiées
   /update <agent>           — Mettre à jour un agent (git pull)
+  /llm                      — Statut et gestion du LLM
+  /llm local|cloud          — Switch le modèle pour tous les agents
+  /llm list                 — Lister les modèles Ollama disponibles
+  /llm set local|cloud <m>  — Définir un profil et l'activer
   /admins                   — Lister les utilisateurs autorisés
   /admins add <jid>         — Autoriser un nouvel utilisateur
   /admins remove <jid>      — Retirer un utilisateur
