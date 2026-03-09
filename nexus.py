@@ -160,12 +160,17 @@ class Nexus(BaseAgent):
                 self._xmpp_reply(sender, "Broadcast envoyé à tous les agents.", is_muc)
             return
 
-        # ── Mode naturel → LLM → skills
-        extra_ctx = self.registry.summary_for_llm(self._online_agents)
-        response = self._llm_loop(body, context, extra_ctx)
-
-        if self.xmpp:
-            self._xmpp_reply(sender, response, is_muc)
+        # ── Mode naturel → LLM → skills (un seul appel à la fois)
+        if not self._llm_lock.acquire(blocking=False):
+            self._xmpp_reply(sender, "⏳ Je traite déjà une demande, attends un instant.", is_muc)
+            return
+        try:
+            extra_ctx = self.registry.summary_for_llm(self._online_agents)
+            response = self._llm_loop(body, context, extra_ctx)
+            if self.xmpp:
+                self._xmpp_reply(sender, response, is_muc)
+        finally:
+            self._llm_lock.release()
 
     def _xmpp_reply(self, sender: str, body: str, is_muc: bool):
         """Répond dans le bon canal : MUC si message vient du MUC, direct sinon."""
