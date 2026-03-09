@@ -1,0 +1,5 @@
+agents_core @ file:///opt/agents_core
+apscheduler>=3.10
+duckduckgo-search>=6.0
+beautifulsoup4>=4.12
+requests>=2.28

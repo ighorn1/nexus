@@ -1,0 +1,18 @@
+[Unit]
+Description=Nexus — Orchestrateur principal multi-agents
+After=network.target mosquitto.service
+Wants=mosquitto.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/nexus
+ExecStart=/opt/nexus/venv/bin/python /opt/nexus/nexus.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexus
+
+[Install]
+WantedBy=multi-user.target

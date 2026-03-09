@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.log
+data/
+*.egg-info/
+.vault_pass
+config/config.json
