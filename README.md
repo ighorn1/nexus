@@ -8,7 +8,7 @@ Nexus est le point d'entrée unique pour l'utilisateur. Il ne fait pas de travai
 
 ```
 sylvain@xmpp.ovh
-       ↕ XMPP
+       ↕ XMPP (OMEMO chiffré)
   nexus@xmpp.ovh
        ↕ MQTT
   debian.local  /  ansible.main  /  deploy  /  ...
@@ -31,6 +31,7 @@ systemctl enable --now nexus
 | `delegate` | Délègue une tâche à un agent via MQTT |
 | `agents_status` | Liste les agents en ligne/hors ligne |
 | `memory` | Mémoire clé/valeur SQLite persistante |
+| `script` | Bibliothèque de scripts bash (save/list/show/exec/run/delete) |
 | `web_search` | Recherche DuckDuckGo |
 | `web_read` | Lecture de page web (BeautifulSoup) |
 | `mqtt_send` | Publie sur un topic MQTT arbitraire |
@@ -54,9 +55,21 @@ systemctl enable --now nexus
 /llm list                 — Liste les modèles Ollama disponibles
 /llm set local <model>    — Définir le profil local et l'activer
 /llm set cloud <model>    — Définir le profil cloud et l'activer
+/queue                    — État du coordinateur LLM + files d'attente
 ```
 
-### Planification
+### Scripts
+```
+/script run <agent> <nom> [args]          — Exécuter un script immédiatement
+/script schedule <fréq> <agent> <nom>     — Planifier un script
+/script unschedule <job_id>               — Annuler une planification
+/script schedules                         — Voir les scripts planifiés
+/script list <agent>                      — Lister les scripts d'un agent
+
+Fréquences : daily HH:MM | once HH:MM | every Xh | every Xmin | weekly <jour> HH:MM
+```
+
+### Planification de tâches
 ```
 /schedule daily 03:00 @debian apt upgrade -y
 /schedule every 6h @ansible playbook site.yml
@@ -70,6 +83,7 @@ systemctl enable --now nexus
 /admins add <jid>         — Autoriser un utilisateur
 /admins remove <jid>      — Retirer un utilisateur
 /update <agent>           — Demande git pull + restart à un agent
+/update all               — Met à jour tous les agents
 /report [agent]           — Rapport quotidien
 /reset                    — Effacer l'historique LLM
 /sleep / /wake            — Mettre Nexus en veille / réveiller
@@ -79,6 +93,17 @@ systemctl enable --now nexus
 ```
 @debian.local apt update  — Commande directe sans passer par le LLM
 @all status               — Broadcast à tous les agents
+```
+
+## Notifications automatiques
+
+Nexus envoie une notification XMPP à chaque exécution de script sur n'importe quel agent (planifiée ou manuelle) :
+```
+📋 Script exécuté
+  Agent   : debian.local
+  Script  : backup
+  Heure   : 2026-03-15 03:00:00
+  Résultat: ...
 ```
 
 ## Configuration
@@ -96,13 +121,16 @@ systemctl enable --now nexus
   "mqtt": { "host": "localhost", "port": 1883 },
   "llm": {
     "base_url": "http://192.168.7.119:11434",
-    "model": "ministral-3:latest",
+    "model": "qwen3:8b",
     "temperature": 0.3
   },
   "llm_profiles": {
-    "local": "ministral-3:latest",
+    "local": "qwen3:8b",
     "cloud": "gpt-oss:120b-cloud"
   },
+  "llm_coordinator": { "max_concurrent": 1 },
+  "use_omemo": true,
+  "use_llm_coordinator": true,
   "system_prompt": "/opt/nexus/config/system_prompt.txt"
 }
 ```
@@ -113,7 +141,7 @@ systemctl enable --now nexus
 
 ```
 nexus.py              — Point d'entrée principal
-scheduler.py          — Gestion des tâches planifiées (APScheduler)
+scheduler.py          — Gestion des tâches et scripts planifiés (APScheduler)
 daily_report.py       — Agrégation des rapports quotidiens
 skills/               — Skills de Nexus
 config/               — Configuration et system prompt
