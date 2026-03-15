@@ -10,6 +10,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -247,12 +248,55 @@ class Nexus(BaseAgent):
             return self.scheduler.list_jobs()
 
         if cmd == "update":
-            # @agent update → git pull + restart
             target = args.strip()
             if not target:
-                return "Usage : /update <agent_id>"
-            self.mqtt.send_to(target, "/update", msg_type=MessageType.COMMAND)
-            return f"Mise à jour demandée à {target}."
+                return "Usage : /update <agent_id>  (ou /update all)"
+
+            # Mise à jour de tous les agents connus
+            if target == "all":
+                targets = [a.agent_id for a in self.registry.all_agents()
+                           if a.agent_id != self.agent_id]
+                for t in targets:
+                    self.mqtt.send_to(t, "/update", msg_type=MessageType.COMMAND)
+                # Se met à jour lui-même en dernier
+                threading.Thread(
+                    target=lambda: (time.sleep(1), self._do_self_update()),
+                    daemon=True,
+                ).start()
+                return f"Mise à jour demandée à : {', '.join(targets)} + nexus."
+
+            # Mise à jour de nexus lui-même
+            if target == self.agent_id or target == "nexus":
+                return self._do_self_update()
+
+            # Mise à jour d'un agent distant : envoie la commande et attend la réponse
+            import uuid
+            corr_id   = str(uuid.uuid4())[:8]
+            result_topic = f"agents/results/{corr_id}"
+            reply_box = []
+            reply_evt = threading.Event()
+
+            def _on_result(msg, topic):
+                body = msg.payload if isinstance(msg, Message) else str(msg)
+                reply_box.append(body)
+                reply_evt.set()
+
+            self.mqtt.subscribe(result_topic, _on_result)
+            try:
+                self.mqtt.send_to(
+                    target, "/update",
+                    msg_type=MessageType.COMMAND,
+                    correlation_id=corr_id,
+                    reply_to=result_topic,
+                )
+                # Attend la réponse 30s (l'agent peut être lent à puller)
+                got = reply_evt.wait(timeout=30)
+            finally:
+                self.mqtt.unsubscribe(result_topic)
+
+            if got:
+                return reply_box[0]
+            return f"Mise à jour demandée à {target} (pas de réponse dans 30s)."
 
         if cmd == "llm":
             return self._handle_llm_command(args)
