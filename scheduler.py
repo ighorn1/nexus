@@ -4,10 +4,12 @@ Basé sur APScheduler.
 """
 import logging
 import uuid
+from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
@@ -18,10 +20,12 @@ class NexusScheduler:
         self,
         send_task_callback: Callable[[str, str], None],
         request_report_callback: Callable[[str], None],
+        send_script_callback: Optional[Callable[[str, str], None]] = None,
     ):
         self._scheduler = BackgroundScheduler(timezone="Europe/Paris")
-        self._send_task = send_task_callback
+        self._send_task   = send_task_callback
         self._request_report = request_report_callback
+        self._send_script = send_script_callback
         self._jobs: dict[str, dict] = {}  # job_id → metadata
 
     def start(self, config: dict):
@@ -101,6 +105,36 @@ class NexusScheduler:
         }
         return job_id
 
+    def add_script_job(self, frequency: str, agent_id: str,
+                       script_name: str, script_args: str = "",
+                       job_id: Optional[str] = None) -> str:
+        """
+        Planifie l'exécution d'un script sur un agent.
+        Utilise la même syntaxe de fréquence que add_job + 'once HH:MM'.
+        """
+        if self._send_script is None:
+            raise RuntimeError("send_script_callback non configuré")
+        job_id  = job_id or f"script_{agent_id}_{script_name}_{str(uuid.uuid4())[:4]}"
+        trigger = self._parse_frequency(frequency)
+        args_str = script_args.strip()
+
+        self._scheduler.add_job(
+            func=self._send_script,
+            trigger=trigger,
+            args=[agent_id, f"{script_name} {args_str}".strip()],
+            id=job_id,
+            replace_existing=True,
+        )
+        self._jobs[job_id] = {
+            "id":        job_id,
+            "frequency": frequency,
+            "agent":     agent_id,
+            "task":      f"[script] {script_name} {args_str}".strip(),
+            "type":      "script",
+        }
+        logger.info(f"[Scheduler] Script job {job_id} : [{frequency}] @{agent_id} → {script_name}")
+        return job_id
+
     def cancel_job(self, job_id: str) -> bool:
         try:
             self._scheduler.remove_job(job_id)
@@ -145,5 +179,14 @@ class NexusScheduler:
                 return IntervalTrigger(minutes=int(val[:-3]))
             if val.endswith("m"):
                 return IntervalTrigger(minutes=int(val[:-1]))
+
+        # once HH:MM  → exécution unique à la prochaine occurrence de HH:MM
+        if parts[0] == "once" and len(parts) >= 2:
+            hour, minute = map(int, parts[1].split(":"))
+            now = datetime.now()
+            run_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if run_at <= now:
+                run_at += timedelta(days=1)
+            return DateTrigger(run_date=run_at)
 
         raise ValueError(f"Format de fréquence non reconnu : '{frequency}'")

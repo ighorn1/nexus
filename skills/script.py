@@ -18,10 +18,12 @@ Usage LLM :
   SKILL:script ARGS:run | <contenu inline>
   SKILL:script ARGS:delete <nom>
 """
+import json
 import os
 import stat
 import subprocess
 import tempfile
+from datetime import datetime
 
 DESCRIPTION = "Bibliothèque de scripts bash : sauvegarder, lister, afficher, exécuter"
 USAGE = (
@@ -65,6 +67,19 @@ def _build_env(context, scripts_dir: str) -> dict:
     env["AGENT_ID"]         = context.agent_id
     env["SCRIPTS_DIR"]      = scripts_dir
     return env
+
+
+def _notify(context, script_name: str, result: str):
+    """Publie un événement d'exécution sur MQTT pour que Nexus notifie l'utilisateur."""
+    try:
+        context.mqtt.publish_raw("agents/scripts/execution", json.dumps({
+            "agent_id":  context.agent_id,
+            "script":    script_name,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "result":    result[:1000],
+        }))
+    except Exception:
+        pass
 
 
 def _run_script(cmd: str, env: dict, timeout: int = 120) -> str:
@@ -145,7 +160,9 @@ def run(args: str, context) -> str:
         if not os.path.exists(path):
             return f"Script '{name}' introuvable. Utilise 'list' pour voir les scripts disponibles."
         env = _build_env(context, d)
-        return _run_script(f'"{path}" {sargs}', env=env, timeout=120)
+        out = _run_script(f'"{path}" {sargs}', env=env, timeout=120)
+        _notify(context, name, out)
+        return out
 
     # ── run (inline) ──────────────────────────────────────────────────────
     if action == "run":
@@ -162,6 +179,7 @@ def run(args: str, context) -> str:
         env = _build_env(context, d)
         out = _run_script(tmpfile, env=env, timeout=60)
         os.unlink(tmpfile)
+        _notify(context, "<inline>", out)
         return out
 
     # ── delete ────────────────────────────────────────────────────────────
