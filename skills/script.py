@@ -14,6 +14,7 @@ Usage LLM :
   SKILL:script ARGS:list
   SKILL:script ARGS:show <nom>
   SKILL:script ARGS:save <nom> | <contenu>
+  SKILL:script ARGS:edit <nom> <ligne> | <nouveau contenu de ligne>
   SKILL:script ARGS:exec <nom> [args...]
   SKILL:script ARGS:run | <contenu inline>
   SKILL:script ARGS:delete <nom>
@@ -25,11 +26,12 @@ import subprocess
 import tempfile
 from datetime import datetime
 
-DESCRIPTION = "Bibliothèque de scripts bash : sauvegarder, lister, afficher, exécuter"
+DESCRIPTION = "Bibliothèque de scripts bash : sauvegarder, lister, afficher, éditer, exécuter"
 USAGE = (
     "SKILL:script ARGS:list\n"
     "SKILL:script ARGS:show <nom>\n"
     "SKILL:script ARGS:save <nom> | <contenu>\n"
+    "SKILL:script ARGS:edit <nom> <ligne> | <nouveau contenu>\n"
     "SKILL:script ARGS:exec <nom> [args]\n"
     "SKILL:script ARGS:run | <contenu inline>\n"
     "SKILL:script ARGS:delete <nom>"
@@ -53,9 +55,18 @@ def _ensure_dir(context) -> str:
     return d
 
 
+_FORBIDDEN_EXTENSIONS = {".service", ".timer", ".socket", ".target", ".mount", ".conf", ".py", ".js"}
+
+
 def _safe_name(name: str) -> str:
-    """Empêche les traversées de répertoire."""
-    return os.path.basename(name.strip().replace("/", "_"))
+    """Empêche les traversées de répertoire et normalise le nom."""
+    n = os.path.basename(name.strip().replace("/", "_"))
+    # Retire toute extension connue pour obtenir le nom brut
+    root, ext = os.path.splitext(n)
+    while ext:
+        n = root
+        root, ext = os.path.splitext(n)
+    return n
 
 
 def _build_env(context, scripts_dir: str) -> dict:
@@ -137,6 +148,20 @@ def run(args: str, context) -> str:
         name_raw, content = rest.split("|", 1)
         name    = _safe_name(name_raw)
         content = content.strip().replace("\\n", "\n")
+
+        if not name:
+            return "Nom de script invalide."
+
+        # Vérifie extension interdite sur le nom brut
+        _, raw_ext = os.path.splitext(name_raw.strip())
+        if raw_ext.lower() in _FORBIDDEN_EXTENSIONS:
+            return f"Extension '{raw_ext}' interdite. Utilise un nom sans extension (ex: mon_script)."
+
+        # Vérifie que le contenu est substantiel (pas juste un shebang ou vide)
+        lines = [l.strip() for l in content.splitlines() if l.strip() and not l.strip().startswith("#")]
+        if len(lines) < 1:
+            return "Contenu du script vide ou incomplet. Fournis au moins une commande."
+
         d       = _ensure_dir(context)
         path    = os.path.join(d, name + ".sh")
         existed = os.path.exists(path)
@@ -147,6 +172,35 @@ def run(args: str, context) -> str:
         os.chmod(path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IROTH)
         verb = "mis à jour" if existed else "créé"
         return f"Script '{name}' {verb} : {path}"
+
+    # ── edit ──────────────────────────────────────────────────────────────
+    if action == "edit":
+        # Format : edit <nom> <numéro_ligne> | <nouveau contenu de ligne>
+        if "|" not in rest:
+            return "Format : edit <nom> <ligne> | <nouveau contenu>\nEx: edit mon_script 3 | echo 'nouveau'"
+        head, new_line_content = rest.split("|", 1)
+        head_parts = head.strip().split(None, 1)
+        if len(head_parts) < 2:
+            return "Format : edit <nom> <ligne> | <nouveau contenu>"
+        name = _safe_name(head_parts[0])
+        try:
+            line_no = int(head_parts[1].strip())
+        except ValueError:
+            return "Le numéro de ligne doit être un entier."
+        if line_no < 1:
+            return "Le numéro de ligne doit être >= 1."
+        d    = _ensure_dir(context)
+        path = os.path.join(d, name + ".sh")
+        if not os.path.exists(path):
+            return f"Script '{name}' introuvable dans {d}"
+        with open(path) as f:
+            lines = f.readlines()
+        if line_no > len(lines):
+            return f"Le script '{name}' n'a que {len(lines)} lignes."
+        lines[line_no - 1] = new_line_content.strip() + "\n"
+        with open(path, "w") as f:
+            f.writelines(lines)
+        return f"Ligne {line_no} du script '{name}' modifiée.\nNouveau contenu :\n{''.join(lines)}"
 
     # ── exec ──────────────────────────────────────────────────────────────
     if action == "exec":

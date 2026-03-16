@@ -31,7 +31,7 @@ systemctl enable --now nexus
 | `delegate` | Délègue une tâche à un agent via MQTT |
 | `agents_status` | Liste les agents en ligne/hors ligne |
 | `memory` | Mémoire clé/valeur SQLite persistante |
-| `script` | Bibliothèque de scripts bash (save/list/show/exec/run/delete) |
+| `script` | Bibliothèque de scripts bash (save/list/show/edit/exec/run/delete) |
 | `web_search` | Recherche DuckDuckGo |
 | `web_read` | Lecture de page web (BeautifulSoup) |
 | `mqtt_send` | Publie sur un topic MQTT arbitraire |
