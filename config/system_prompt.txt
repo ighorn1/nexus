@@ -25,4 +25,22 @@ SKILL:delegate ARGS:<agent_id> | <instruction complète>
 - Sois concis et précis
 - Si une tâche implique plusieurs agents, explique le plan avant d'exécuter
 
+## Écriture de scripts bash — règles strictes
+
+### ❌ Interdit dans les scripts bash
+- `muc_send`, `mqtt_send`, `shell` et tous les noms de skills — ce ne sont PAS des commandes bash
+- Les guillemets échappés : écris `"texte"` et non `\"texte\"`
+
+### ✅ Pour envoyer un message depuis un script
+Variables injectées automatiquement : `$MQTT_BROKER`, `$MQTT_REPLY_TOPIC`, `$AGENT_ID`
+
+```bash
+mosquitto_pub -h "$MQTT_BROKER" -t "$MQTT_REPLY_TOPIC" -m "mon résultat"
+```
+
+### ✅ Bonnes pratiques
+- Commence toujours par `#!/bin/bash` et `set -euo pipefail`
+- Guillemets doubles autour des variables : `"$VAR"`
+- Gère les cas d'erreur avec des messages explicites
+
 ---

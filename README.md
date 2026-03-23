@@ -28,7 +28,7 @@ systemctl enable --now nexus
 
 | Skill | Description |
 |-------|-------------|
-| `delegate` | Délègue une tâche à un agent via MQTT |
+| `delegate` | Délègue une tâche à un agent via MQTT (vérifie les `work_hours` de l'agent cible) |
 | `agents_status` | Liste les agents en ligne/hors ligne |
 | `memory` | Mémoire clé/valeur SQLite persistante |
 | `script` | Bibliothèque de scripts bash (save/list/show/edit/exec/run/delete) |
@@ -80,14 +80,29 @@ Fréquences : daily HH:MM | once HH:MM | every Xh | every Xmin | weekly <jour> H
 ### Administration
 ```
 /admins                   — Lister les JIDs autorisés
-/admins add <jid>         — Autoriser un utilisateur
-/admins remove <jid>      — Retirer un utilisateur
+/admins add <jid>         — Autoriser un utilisateur (persistant)
+/admins remove <jid>      — Retirer un utilisateur (persistant)
 /update <agent>           — Demande git pull + restart à un agent
 /update all               — Met à jour tous les agents
 /report [agent]           — Rapport quotidien
 /reset                    — Effacer l'historique LLM
 /sleep / /wake            — Mettre Nexus en veille / réveiller
 ```
+
+### APIs externes (one-shot)
+```
+/claude-apikey <clé>      — Enregistrer la clé API Anthropic
+/claude-models            — Lister les modèles Claude disponibles
+/claude-model <modèle>    — Définir le modèle par défaut (ex: claude-opus-4-6)
+/claude <prompt>          — Appel one-shot à l'API Anthropic
+
+/mammouth-apikey <clé>    — Enregistrer la clé API Mammouth
+/mammouth-models          — Lister les modèles Mammouth disponibles
+/mammouth-model <modèle>  — Définir le modèle par défaut (ex: gpt-4.1)
+/mammouth <prompt>        — Appel one-shot à l'API Mammouth
+```
+
+Les clés et modèles sont persistés dans `config.json` sous `apis.claude` et `apis.mammouth`. Mammouth est compatible OpenAI API (`https://api.mammouth.ai/v1`).
 
 ### Routing direct
 ```
@@ -131,7 +146,11 @@ Nexus envoie une notification XMPP à chaque exécution de script sur n'importe 
   "llm_coordinator": { "max_concurrent": 1 },
   "use_omemo": true,
   "use_llm_coordinator": true,
-  "system_prompt": "/opt/nexus/config/system_prompt.txt"
+  "system_prompt": "/opt/nexus/config/system_prompt.txt",
+  "apis": {
+    "claude":   { "key": "sk-ant-...", "model": "claude-opus-4-6" },
+    "mammouth": { "key": "...",        "model": "gpt-4.1" }
+  }
 }
 ```
 

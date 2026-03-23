@@ -342,6 +342,30 @@ class Nexus(BaseAgent):
         if cmd == "admins":
             return self._handle_admins_command(args)
 
+        if cmd == "claude-apikey":
+            return self._set_api_key("claude", args.strip())
+
+        if cmd == "claude-models":
+            return self._list_models("claude")
+
+        if cmd == "claude-model":
+            return self._set_default_model("claude", args.strip())
+
+        if cmd == "claude":
+            return self._call_api("claude", args.strip())
+
+        if cmd == "mammouth-apikey":
+            return self._set_api_key("mammouth", args.strip())
+
+        if cmd == "mammouth-models":
+            return self._list_models("mammouth")
+
+        if cmd == "mammouth-model":
+            return self._set_default_model("mammouth", args.strip())
+
+        if cmd == "mammouth":
+            return self._call_api("mammouth", args.strip())
+
         if cmd == "help":
             return self._nexus_help()
 
@@ -611,6 +635,20 @@ class Nexus(BaseAgent):
         except Exception as e:
             return f"Erreur Ollama : {e}"
 
+    def _save_admins_to_config(self):
+        """Persiste la liste des admins dans config.json."""
+        import json
+        try:
+            with open(self.DEFAULT_CONFIG_PATH, "r") as f:
+                cfg = json.load(f)
+            cfg.setdefault("xmpp", {})["admin_jids"] = sorted(self.xmpp.admin_jids)
+            # Supprime l'ancienne clé singulière si présente
+            cfg["xmpp"].pop("admin_jid", None)
+            with open(self.DEFAULT_CONFIG_PATH, "w") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Impossible de sauvegarder les admins : {e}")
+
     def _handle_admins_command(self, args: str) -> str:
         """
         /admins          → liste les admins autorisés
@@ -638,12 +676,14 @@ class Nexus(BaseAgent):
             if not jid:
                 return "Usage : /admins add <jid>"
             self.xmpp.add_admin(jid)
+            self._save_admins_to_config()
             return f"Admin ajouté : {jid}"
 
         if sub == "remove":
             if not jid:
                 return "Usage : /admins remove <jid>"
             self.xmpp.remove_admin(jid)
+            self._save_admins_to_config()
             return f"Admin retiré : {jid}"
 
         return "Usage : /admins | /admins add <jid> | /admins remove <jid>"
@@ -684,6 +724,131 @@ class Nexus(BaseAgent):
         except (StopIteration, IndexError, ValueError) as e:
             return f"Format invalide : {e}\nUsage : /schedule daily 03:00 @agent tâche"
 
+    # ──────────────────────────────────────────────
+    # APIs externes : Claude / Mammouth
+    # ──────────────────────────────────────────────
+
+    def _set_api_key(self, service: str, key: str) -> str:
+        if not key:
+            return f"Usage : /{service}-apikey <clé>"
+        try:
+            import json
+            with open(self.DEFAULT_CONFIG_PATH) as f:
+                cfg = json.load(f)
+            cfg.setdefault("apis", {}).setdefault(service, {})["key"] = key
+            with open(self.DEFAULT_CONFIG_PATH, "w") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            return f"✅ Clé API {service} enregistrée."
+        except Exception as e:
+            return f"❌ Erreur : {e}"
+
+    def _set_default_model(self, service: str, model: str) -> str:
+        if not model:
+            return f"Usage : /{service}-model <nom_du_modèle>"
+        try:
+            import json
+            with open(self.DEFAULT_CONFIG_PATH) as f:
+                cfg = json.load(f)
+            cfg.setdefault("apis", {}).setdefault(service, {})["model"] = model
+            with open(self.DEFAULT_CONFIG_PATH, "w") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            return f"✅ Modèle par défaut {service} : {model}"
+        except Exception as e:
+            return f"❌ Erreur : {e}"
+
+    def _get_api_config(self, service: str) -> tuple[str, str]:
+        """Retourne (api_key, model) depuis config.json."""
+        apis = self.config.get("apis", {})
+        svc  = apis.get(service, {})
+        key  = svc.get("key", "")
+        defaults = {
+            "claude":   "claude-opus-4-6",
+            "mammouth": "gpt-4.1",
+        }
+        model = svc.get("model", defaults.get(service, ""))
+        return key, model
+
+    def _list_models(self, service: str) -> str:
+        import requests
+        key, _ = self._get_api_config(service)
+        if not key:
+            return f"❌ Clé API {service} non configurée. Utilise /{service}-apikey <clé>"
+
+        try:
+            if service == "claude":
+                r = requests.get(
+                    "https://api.anthropic.com/v1/models",
+                    headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+                    timeout=15,
+                )
+                r.raise_for_status()
+                models = [m["id"] for m in r.json().get("data", [])]
+            else:  # mammouth
+                r = requests.get(
+                    "https://api.mammouth.ai/v1/models",
+                    headers={"Authorization": f"Bearer {key}"},
+                    timeout=15,
+                )
+                r.raise_for_status()
+                models = [m["id"] for m in r.json().get("data", [])]
+
+            if not models:
+                return f"Aucun modèle retourné pour {service}."
+            _, current = self._get_api_config(service)
+            lines = [f"Modèles disponibles ({service}) :"]
+            for m in models:
+                marker = " ◀ défaut" if m == current else ""
+                lines.append(f"  • {m}{marker}")
+            lines.append(f"\nPour changer : /{service}-model <nom>")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"❌ Erreur listing modèles {service} : {e}"
+
+    def _call_api(self, service: str, prompt: str) -> str:
+        import requests
+        if not prompt:
+            return f"Usage : /{service} <prompt>"
+
+        key, model = self._get_api_config(service)
+        if not key:
+            return f"❌ Clé API {service} non configurée. Utilise /{service}-apikey <clé>"
+
+        try:
+            if service == "claude":
+                r = requests.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "max_tokens": 1024,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                    timeout=60,
+                )
+                r.raise_for_status()
+                return r.json()["content"][0]["text"]
+            else:  # mammouth (OpenAI-compatible)
+                r = requests.post(
+                    "https://api.mammouth.ai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                    timeout=60,
+                )
+                r.raise_for_status()
+                return r.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            return f"❌ Erreur {service} : {e}"
+
     def _nexus_help(self) -> str:
         base = help_text()
         nexus_extra = """
@@ -713,6 +878,14 @@ class Nexus(BaseAgent):
   /resume [agent]           — Reprendre
   /reset                    — Effacer l'historique LLM
   /status                   — Statut de Nexus
+  /claude-apikey <clé>      — Enregistrer la clé API Anthropic
+  /claude-models            — Lister les modèles Claude disponibles
+  /claude-model <modèle>    — Définir le modèle Claude par défaut
+  /claude <prompt>          — Appel one-shot Claude (API Anthropic)
+  /mammouth-apikey <clé>    — Enregistrer la clé API Mammouth
+  /mammouth-models          — Lister les modèles Mammouth disponibles
+  /mammouth-model <modèle>  — Définir le modèle Mammouth par défaut
+  /mammouth <prompt>        — Appel one-shot Mammouth
 
 Mode @agent :
   @debian-prod apt update   — Commande directe

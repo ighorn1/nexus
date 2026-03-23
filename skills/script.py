@@ -147,7 +147,7 @@ def run(args: str, context) -> str:
             return "Format : save <nom> | <contenu du script>"
         name_raw, content = rest.split("|", 1)
         name    = _safe_name(name_raw)
-        content = content.strip().replace("\\n", "\n")
+        content = content.strip().replace("\\n", "\n").replace('\\"', '"').replace("\\'", "'")
 
         if not name:
             return "Nom de script invalide."
